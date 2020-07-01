@@ -21,10 +21,16 @@ public class LoginActivity extends AppCompatActivity {
         sp = getApplicationContext().getSharedPreferences("myPreferences", Context.MODE_PRIVATE);
         usernameInput = findViewById(R.id.et_username);
 
+        if (!sp.getBoolean("isFirstTime", true)) {
+            startActivity(new Intent(this, MainActivity.class));
+            finish();
+        }
+
     }
 
     public void loginOnClick(View view){
         sp.edit().putString("username", usernameInput.getText().toString()).apply();
+        startActivity(new Intent(this, MainActivity.class));
         finish();
     }
 

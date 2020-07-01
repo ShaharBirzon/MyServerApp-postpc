@@ -6,65 +6,81 @@ import androidx.work.Constraints;
 import androidx.work.Data;
 import androidx.work.NetworkType;
 import androidx.work.OneTimeWorkRequest;
-import androidx.work.Operation;
 import androidx.work.WorkInfo;
 import androidx.work.WorkManager;
 
 import android.content.Context;
-import android.content.Intent;
 import android.content.SharedPreferences;
+import android.net.Uri;
 import android.os.Bundle;
 import android.util.Log;
 import android.view.View;
+import android.widget.ImageView;
+import android.widget.ProgressBar;
 import android.widget.TextView;
 
-import com.example.myserverapp.data.Ticket;
+import com.bumptech.glide.Glide;
 import com.example.myserverapp.data.TokenResponse;
-import com.example.myserverapp.data.User;
-import com.example.myserverapp.work.ConnectivityCheckWorker;
-import com.example.myserverapp.work.CreateNewTicketWorker;
+import com.example.myserverapp.data.UserResponse;
 import com.example.myserverapp.work.GetTokenWorker;
 import com.example.myserverapp.work.GetUserWorker;
+import com.example.myserverapp.work.PostNewPrettyNameWorker;
 import com.google.gson.Gson;
-import com.google.gson.reflect.TypeToken;
 
 import java.util.List;
 import java.util.UUID;
 
 public class MainActivity extends AppCompatActivity {
-    User user;
+    TokenResponse tokenResponse;
     private SharedPreferences sp;
-    private static final String USER_ID = "3";
+    ProgressBar pb;
+    TextView tokenTxt;
+    TextView prettyNameTxt;
+    TextView usernameTxt;
+    ImageView userImg;
     private static String TAG = "MainActivity";
-    public static String token;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_main);
 
+        // init views
+        pb = findViewById(R.id.progress_bar);
+        tokenTxt = findViewById(R.id.tv_token);
+        prettyNameTxt = findViewById(R.id.tv_pretty);
+        usernameTxt = findViewById(R.id.tv_username);
+        userImg = findViewById(R.id.user_img);
+
         sp = getApplicationContext().getSharedPreferences("myPreferences", Context.MODE_PRIVATE);
-        if (sp.getBoolean("isFirstTime", true)){
+        if (sp.getBoolean("isFirstTime", true)){ // check if first time
             sp.edit().putBoolean("isFirstTime", false).apply();
-            startActivity(new Intent(this, LoginActivity.class));
+
+            String username = sp.getString("username", "");
+            if(username.equals("")){
+                Log.d(TAG, "error! cannot find username in sp");
+            }
+            else{
+                getUserToken(username);
+            }
         }
 
-//        checkConnectivityAndSetUI();
-
-        String username = sp.getString("username", "");
-        if(username.equals("")){
-            Log.d(TAG, "error! cannot find username in sp");
-        }
         else{
-            getUserToken(username);
+            String trJson = sp.getString("user_token", "");
+            tokenResponse = new Gson().fromJson(trJson, TokenResponse.class);
+            tokenTxt.setText(tokenResponse.data);
+            usernameTxt.setText(sp.getString("username", ""));
+            getUser();
         }
-
-
-//        getUser();
-//        createSampleTicket();
     }
 
+
+    /**
+     * get token for first time user
+     * @param username
+     */
     private void getUserToken(String username) {
+        pb.setVisibility(View.VISIBLE);
         UUID workTagUniqueId = UUID.randomUUID();
         OneTimeWorkRequest checkConnectivityWork = new OneTimeWorkRequest.Builder(GetTokenWorker.class)
                 .setConstraints(new Constraints.Builder().setRequiredNetworkType(NetworkType.CONNECTED).build())
@@ -78,9 +94,6 @@ public class MainActivity extends AppCompatActivity {
                 .observe(this, new Observer<List<WorkInfo>>() {
                     @Override
                     public void onChanged(List<WorkInfo> workInfos) {
-                        // we know there will be only 1 work info in this list - the 1 work with that specific tag!
-                        // there might be some time until this worker is finished to work (in the mean team we will get an empty list
-                        // so check for that
                         if (workInfos == null || workInfos.isEmpty())
                             return;
 
@@ -91,154 +104,126 @@ public class MainActivity extends AppCompatActivity {
 
                         WorkInfo info = workInfos.get(0);
 
-                        // now we can use it
                         String tokenAsJson = info.getOutputData().getString("key_output_user");
                         Log.d(TAG, "got token: " + tokenAsJson);
-                        sp.edit().putString(tokenAsJson, "").apply(); // adding token to sp
+                        sp.edit().putString("user_token", tokenAsJson).apply(); // adding token to sp
 
-                        TokenResponse tokenResponse = new Gson().fromJson(tokenAsJson, TokenResponse.class);
+                        tokenResponse = new Gson().fromJson(tokenAsJson, TokenResponse.class);
 
-                        System.out.println("yay");
-
-                        TextView tokenTxt = findViewById(R.id.tv_token);
                         tokenTxt.setText(tokenResponse.data);
                     }
                 });
+        pb.setVisibility(View.GONE);
     }
 
+    /**
+     * on click for saving pretty name
+     * @param view
+     */
     public void savePrettyOnClick(View view){
-
+        TextView prettyNameTxt = findViewById(R.id.et_prettyname);
+        setNewPrettyName(prettyNameTxt.getText().toString());
+        prettyNameTxt.setText("");
     }
 
-
-    private void checkConnectivityAndSetUI(){
-
-        OneTimeWorkRequest checkConnectivityWork = new OneTimeWorkRequest.Builder(ConnectivityCheckWorker.class)
-
-                .setConstraints(new Constraints.Builder().setRequiredNetworkType(NetworkType.CONNECTED).build())
-                // if we will remove the constraints - then the connectivity check will happen immediately
-                // if we will add the constraints - then the connectivity check will happen only after we have access to the internet
-
+    /**
+     * set pretty name in server
+     * @param newName
+     */
+    public void setNewPrettyName(final String newName) {
+        pb.setVisibility(View.VISIBLE);
+        UUID workTagUniqueId = UUID.randomUUID();
+        OneTimeWorkRequest oneTimeWorkRequest = new OneTimeWorkRequest
+                .Builder(PostNewPrettyNameWorker.class)
+                .setConstraints(new Constraints.Builder()
+                        .setRequiredNetworkType(NetworkType.CONNECTED).build())
+                .setInputData(new Data.Builder().putString("key_get_new_pretty_name", newName)
+                        .putString("key_get_token", tokenResponse.data).build())
+                .addTag(workTagUniqueId.toString())
                 .build();
 
-        Operation runningWork = WorkManager.getInstance().enqueue(checkConnectivityWork);
+        WorkManager.getInstance().enqueue(oneTimeWorkRequest);
+        WorkManager.getInstance().getWorkInfosByTagLiveData(workTagUniqueId.toString())
+                .observe(this, new Observer<List<WorkInfo>>() {
+                    @Override
+                    public void onChanged(List<WorkInfo> workInfos) {
+                        if (workInfos == null || workInfos.isEmpty()) {
+                            return;
+                        }
+                        if (workInfos.get(0).getState() == WorkInfo.State.FAILED ||
+                                workInfos.get(0).getState() != WorkInfo.State.SUCCEEDED) {
+                            return;
+                        }
 
-        runningWork.getState().observe(this, new Observer<Operation.State>() {
-            @Override
-            public void onChanged(Operation.State state) {
-                if (state == null) return;
+                        WorkInfo info = workInfos.get(0);
+                        String AsJson = info.getOutputData().getString("key_get_pretty_name");
+                        UserResponse userResponse = new Gson().fromJson(AsJson, UserResponse.class);
 
-                if (state instanceof Operation.State.SUCCESS) {
-                    // update UI - connected
-                }
-                else {
-                    // update UI - not connected :(
-                }
-            }
-        });
+                        String userName = userResponse.data.pretty_name;
+                        if (userName == null || userName.equals("")) {
+                            userResponse.data.pretty_name = userResponse.data.username;
+                        }
+
+                        updateUserUI(userResponse);
+                    }
+                });
+
+        pb.setVisibility(View.GONE);
     }
 
+    /**
+     * get logged in user data from server
+     */
     private void getUser(){
+        pb.setVisibility(View.VISIBLE);
         UUID workTagUniqueId = UUID.randomUUID();
-        OneTimeWorkRequest checkConnectivityWork = new OneTimeWorkRequest.Builder(GetUserWorker.class)
-                .setConstraints(new Constraints.Builder().setRequiredNetworkType(NetworkType.CONNECTED).build())
-                .setInputData(new Data.Builder().putString("key_user_id", USER_ID).build())
+        OneTimeWorkRequest oneTimeWorkRequest = new OneTimeWorkRequest
+                .Builder(GetUserWorker.class)
+                .setConstraints(new Constraints.Builder()
+                        .setRequiredNetworkType(NetworkType.CONNECTED).build())
+                .setInputData(new Data.Builder().putString("key_get_info",
+                        tokenResponse.data).build())
                 .addTag(workTagUniqueId.toString())
                 .build();
 
-        WorkManager.getInstance().enqueue(checkConnectivityWork);
+        WorkManager.getInstance().enqueue(oneTimeWorkRequest);
+        WorkManager.getInstance().getWorkInfosByTagLiveData(workTagUniqueId.toString())
+                .observe(this, new Observer<List<WorkInfo>>() {
+                    @Override
+                    public void onChanged(List<WorkInfo> workInfos) {
+                        if (workInfos == null || workInfos.isEmpty()) {
+                            return;
+                        }
+                        if (workInfos.get(0).getState() == WorkInfo.State.FAILED ||
+                                workInfos.get(0).getState() != WorkInfo.State.SUCCEEDED) {
+                            return;
+                        }
+                        WorkInfo info = workInfos.get(0);
+                        String AsJson = info.getOutputData().getString("key_get_user");
+                        UserResponse userResponse = new Gson().fromJson(AsJson, UserResponse.class);
 
-        WorkManager.getInstance().getWorkInfosByTagLiveData(workTagUniqueId.toString()).observe(this, new Observer<List<WorkInfo>>() {
-            @Override
-            public void onChanged(List<WorkInfo> workInfos) {
-                // we know there will be only 1 work info in this list - the 1 work with that specific tag!
-                // there might be some time until this worker is finished to work (in the mean team we will get an empty list
-                // so check for that
-                if (workInfos == null || workInfos.isEmpty())
-                    return;
+                        String prettyName = userResponse.data.pretty_name;
+                        if (prettyName == null || prettyName.equals("")) {  // in case pretty name not set
+                            userResponse.data.pretty_name = userResponse.data.username;
+                        }
 
-                WorkInfo info = workInfos.get(0);
+                       updateUserUI(userResponse);
 
-                // now we can use it
-                String userAsJson = info.getOutputData().getString("key_output_user");
-                Log.d(TAG, "got user: " + userAsJson);
-
-                user = new Gson().fromJson(userAsJson, User.class);
-                // update UI with the user we got
-            }
-        });
+                    }
+                });
+        pb.setVisibility(View.GONE);
     }
 
-    private void getAllTicketsForUser(){
-        UUID workTagUniqueId = UUID.randomUUID();
-        OneTimeWorkRequest checkConnectivityWork = new OneTimeWorkRequest.Builder(GetUserWorker.class)
-                .setConstraints(new Constraints.Builder().setRequiredNetworkType(NetworkType.CONNECTED).build())
-                .setInputData(new Data.Builder().putString("key_user_id", USER_ID).build())
-                .addTag(workTagUniqueId.toString())
-                .build();
-
-        WorkManager.getInstance().enqueue(checkConnectivityWork);
-
-        WorkManager.getInstance().getWorkInfosByTagLiveData(workTagUniqueId.toString()).observe(this, new Observer<List<WorkInfo>>() {
-            @Override
-            public void onChanged(List<WorkInfo> workInfos) {
-                // we know there will be only 1 work info in this list - the 1 work with that specific tag!
-                // there might be some time until this worker is finished to work (in the mean team we will get an empty list
-                // so check for that
-                if (workInfos == null || workInfos.isEmpty())
-                    return;
-
-                WorkInfo info = workInfos.get(0);
-
-                // now we can use it
-                String ticketsAsJson = info.getOutputData().getString("key_output_tickets");
-                List<Ticket> allTickets = new Gson().fromJson(ticketsAsJson, new TypeToken<List<Ticket>>(){}.getType());
-
-                Log.d(TAG, "got tickets list with size " + allTickets.size());
-
-
-                // update UI with the list we got
-            }
-        });
+    /**
+     * update relevant ui for user
+     * @param ur UserResponse object
+     */
+    private void updateUserUI(UserResponse ur){
+        prettyNameTxt.setText(ur.data.pretty_name);
+        usernameTxt.setText(ur.data.username);
+        Glide.with(MainActivity.this)
+                .load(Uri.parse("https://hujipostpc2019.pythonanywhere.com" + ur.data.image_url))
+                .into(userImg);
     }
 
-
-    private void createSampleTicket(){
-        Ticket ticket = new Ticket();
-        ticket.id = 0;
-        ticket.user_id = Integer.valueOf(USER_ID);
-        ticket.title = "mock ticket";
-        ticket.completed = false;
-
-        String ticketAsJson = new Gson().toJson(ticket);
-
-        UUID workTagUniqueId = UUID.randomUUID();
-        OneTimeWorkRequest checkConnectivityWork = new OneTimeWorkRequest.Builder(CreateNewTicketWorker.class)
-                .setConstraints(new Constraints.Builder().setRequiredNetworkType(NetworkType.CONNECTED).build())
-                .setInputData(new Data.Builder().putString("key_input_ticket", ticketAsJson).build())
-                .addTag(workTagUniqueId.toString())
-                .build();
-
-        WorkManager.getInstance().enqueue(checkConnectivityWork);
-
-        WorkManager.getInstance().getWorkInfosByTagLiveData(workTagUniqueId.toString()).observe(this, new Observer<List<WorkInfo>>() {
-            @Override
-            public void onChanged(List<WorkInfo> workInfos) {
-                // we know there will be only 1 work info in this list - the 1 work with that specific tag!
-                // there might be some time until this worker is finished to work (in the mean team we will get an empty list
-                // so check for that
-                if (workInfos == null || workInfos.isEmpty())
-                    return;
-
-                WorkInfo info = workInfos.get(0);
-
-                // now we can use it
-                String ticketAsJson = info.getOutputData().getString("key_output");
-                Log.d(TAG, "got created ticket: " + ticketAsJson);
-                Ticket ticketResponse = new Gson().fromJson(ticketAsJson, Ticket.class);
-
-                // update UI with the ticket response.
-            }
-        });
-    }
 }

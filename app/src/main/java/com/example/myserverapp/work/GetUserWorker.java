@@ -25,17 +25,15 @@ public class GetUserWorker extends Worker {
     @Override
     public Result doWork() {
         MyServerInterface serverInterface = ServerHolder.getInstance().serverInterface;
-
-        String userName = getInputData().getString("key_user_id");
-        String token = getInputData().getString("token");
+        String token = "token " + getInputData().getString("key_get_info");
 
         try {
-            Response<UserResponse> response = serverInterface.getUserFromServer(userName, token).execute();
-            User user = response.body().data;
+            Response<UserResponse> response = serverInterface.getUserFromServer(token).execute();
+            UserResponse user = response.body();
             String userAsJson = new Gson().toJson(user);
 
             Data outputData = new Data.Builder()
-                    .putString("key_output_user", userAsJson)
+                    .putString("key_get_user", userAsJson)
                     .build();
 
             return Result.success(outputData);

@@ -1,0 +1,15 @@
+Theoretical question:
+As a client, at the first time you got a token. You have 2 options:
+a. save the token locally (for example in a file or in SP)
+b. use this token only in this current app-launch, and re-request a token from the server each time the app launches again.
+
+write at least 1 pro and 1 con for each implementation (a) & (b), in your git repository in a file named "theoretical_question.txt".
+
+Answer:
+option 1: save in sp - 
+* pro - much easier and straight forward, saves up the server callings in every app launch.
+* con - less secure.
+
+option 2: re-request token from server - 
+* pro - secured (espacially if we use https protocol), since the token is generated randomly by the server.
+* con - takes more time since we need to call the distant server and wait for response. 
